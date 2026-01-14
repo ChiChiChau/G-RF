@@ -1,1 +1,697 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AtomGalaxy Viewer (MVP)</title>
+  <style>
+    html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+    #app { display: grid; grid-template-columns: 360px 1fr; height: 100%; }
+    #sidebar { border-right: 1px solid #ddd; padding: 12px; overflow: auto; background: #fff; }
+    #main { position: relative; background: #fafafa; }
+    svg { width: 100%; height: 100%; display: block; }
+
+    .h1 { font-size: 16px; font-weight: 700; margin: 6px 0 10px; }
+    .small { font-size: 12px; color: #666; line-height: 1.35; }
+    .row { display: grid; gap: 8px; margin: 10px 0; }
+    .inline { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+    input[type="text"], input[type="number"] {
+      width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 10px; background: #fff;
+    }
+    .btn {
+      display:inline-flex; align-items:center; justify-content:center;
+      padding: 8px 10px; border-radius: 10px; border: 1px solid #ccc; cursor: pointer; background: white;
+      font-size: 13px;
+    }
+    .btn:active { transform: translateY(1px); }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+    .chip {
+      user-select: none;
+      border: 1px solid #ddd; border-radius: 999px; padding: 5px 10px;
+      font-size: 12px; cursor: pointer; background: #fff;
+    }
+    .chip.active { border-color: #222; color: #fff; background: #222; }
+
+    .card {
+      border: 1px solid #e3e3e3; border-radius: 14px; padding: 10px; background: #fff;
+      box-shadow: 0 6px 16px rgba(0,0,0,0.06);
+    }
+    .title { font-weight: 700; }
+    .muted { color: #777; }
+    .kvs { display: grid; gap: 6px; margin-top: 8px; }
+    .kv { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; }
+    .kv .k { color: #666; }
+    .kv .v { color: #111; text-align: right; }
+
+    .thumbs { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+    .thumbs img {
+      width: 74px; height: 74px; object-fit: cover; border-radius: 12px; border: 1px solid #ddd;
+      background: #f2f2f2;
+    }
+
+    .node circle { stroke: #fff; stroke-width: 1.5px; }
+    .node text { font-size: 11px; pointer-events: none; }
+    .link { stroke: #999; stroke-opacity: 0.3; }
+    .link.highlight { stroke-opacity: 0.9; }
+    .node.dim { opacity: 0.15; }
+    .link.dim { opacity: 0.05; }
+
+    .tooltip {
+      position: absolute; pointer-events: none;
+      background: rgba(0,0,0,0.78); color: #fff; padding: 8px 10px; border-radius: 12px;
+      font-size: 12px; max-width: 360px;
+      transform: translate(-50%, -120%);
+      display: none;
+    }
+
+    #topbar {
+      position: absolute; top: 10px; left: 10px; right: 10px;
+      display: flex; gap: 8px; align-items: center; justify-content: space-between;
+      pointer-events: none;
+    }
+    #topbar .hud {
+      pointer-events: auto;
+      background: rgba(255,255,255,0.92);
+      border: 1px solid #ddd; border-radius: 14px; padding: 8px 10px;
+      display: flex; gap: 8px; align-items: center;
+      box-shadow: 0 6px 16px rgba(0,0,0,0.08);
+    }
+    .pill { border: 1px solid #ddd; border-radius: 999px; padding: 3px 8px; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <aside id="sidebar">
+      <div class="h1">AtomGalaxy Viewer</div>
+      <div class="small">
+        Klick auf ein Atom → Nachbarn leuchten auf.  
+        <b>Local</b> zeigt nur “Umgebung” (wie Denken am Objekt).
+      </div>
+
+      <div class="row">
+        <label class="small">Suche (Name enthält)</label>
+        <input id="search" type="text" placeholder="z.B. Honig, Keramik, Lea…" />
+      </div>
+
+      <div class="row inline">
+        <div>
+          <label class="small">Lokale Tiefe</label>
+          <input id="depth" type="number" min="1" max="6" value="2" />
+        </div>
+        <div>
+          <label class="small">Modus</label>
+          <select id="mode" class="btn" style="width:100%">
+            <option value="global">Global</option>
+            <option value="local">Local (auf Fokus)</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="small">Filter: Typ</div>
+        <div class="chips" id="typeChips"></div>
+      </div>
+
+      <div class="row inline">
+        <button id="reset" class="btn">Reset View</button>
+        <button id="clearFocus" class="btn">Fokus lösen</button>
+      </div>
+
+      <div id="stats" class="small" style="margin-top:10px"></div>
+
+      <div style="margin-top:12px" id="detail"></div>
+
+      <hr style="border:none;border-top:1px solid #eee; margin:14px 0" />
+
+      <div class="small">
+        <b>Daten editieren:</b> Oben im Code ist <code>DATA</code>.  
+        Du trägst dort Menschen / Produkte / Bilder / Reviews ein – fertig.
+      </div>
+    </aside>
+
+    <main id="main">
+      <div id="topbar">
+        <div class="hud">
+          <span class="small">Status:</span>
+          <span id="status" class="pill">Demo-Daten geladen</span>
+        </div>
+        <div class="hud">
+          <span class="small">Steuerung:</span>
+          <span class="small">Scroll=Zoom • Drag=Pan • Node ziehen=fixieren • ESC=Fokus lösen</span>
+        </div>
+      </div>
+      <div class="tooltip" id="tooltip"></div>
+      <svg id="svg"></svg>
+    </main>
+  </div>
+
+  <!-- D3.js -->
+  <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+  <script>
+    // =========================================================
+    // 1) DATA: Hier trägst du deine echten Inhalte ein
+    // =========================================================
+    const DATA = {
+      nodes: [
+        // People
+        { id: "person:lea", type: "Person", name: "Lea", role: "Keramik", bio: "Dreht Steinzeug, matte Glasuren, klare Formen.", tags: ["craft","ceramics"] },
+        { id: "person:amin", type: "Person", name: "Amin", role: "Gourmet", bio: "Fermentation + Aromenküche, kleine Chargen.", tags: ["gourmet","fermentation"] },
+        { id: "person:mara", type: "Person", name: "Mara", role: "Foto", bio: "Produkt- und Prozess-Fotografie, natürliches Licht.", tags: ["media"] },
+
+        // Products (Craft)
+        { id: "product:cup-ember", type: "Product", name: "Cup: Ember", category: "Craft", priceEUR: 28, desc: "Handgedrehte Tasse, matte Glasur, warmes Mundgefühl.", tags: ["cup","stoneware"] },
+        { id: "product:bowl-zen", type: "Product", name: "Bowl: Zen", category: "Craft", priceEUR: 42, desc: "Schale für Ramen/Salat, ruhige Proportionen.", tags: ["bowl","stoneware"] },
+
+        // Products (Gourmet)
+        { id: "product:koji-salt", type: "Product", name: "Koji Salt", category: "Gourmet", priceEUR: 12, desc: "Umami-Salz aus Koji + Meersalz. Für Gemüse, Eier, Fleisch.", tags: ["koji","umami"] },
+        { id: "product:honey-oxymel", type: "Product", name: "Honig-Oxymel", category: "Gourmet", priceEUR: 15, desc: "Honig + Essig + Kräuter. In Wasser, Dressings, Drinks.", tags: ["oxymel","honey"] },
+
+        // Media (Images) — nutzt Platzhalter; du kannst echte URLs oder lokale Pfade nutzen
+        { id: "media:cup1", type: "Media", name: "Cup Foto 1", url: "https://picsum.photos/seed/cup1/300/300", tags: ["image"] },
+        { id: "media:cup2", type: "Media", name: "Cup Foto 2", url: "https://picsum.photos/seed/cup2/300/300", tags: ["image"] },
+        { id: "media:koji1", type: "Media", name: "Koji Foto 1", url: "https://picsum.photos/seed/koji1/300/300", tags: ["image"] },
+        { id: "media:oxymel1", type: "Media", name: "Oxymel Foto 1", url: "https://picsum.photos/seed/oxymel1/300/300", tags: ["image"] },
+
+        // Reviews
+        { id: "review:r1", type: "Review", name: "Review #1", rating: 5, text: "Mega Umami. Macht Tomaten wie 'intensiver Sommer'.", date: "2026-01-04" },
+        { id: "review:r2", type: "Review", name: "Review #2", rating: 4, text: "Tasse liegt super in der Hand. Glasur top.", date: "2026-01-11" },
+
+        // Collections / Concepts (optional, super für Galaxien)
+        { id: "collection:winter-drop", type: "Collection", name: "Winter Drop", desc: "Kleine Serie: warm, ruhig, minimal.", tags: ["collection"] },
+        { id: "concept:umami", type: "Concept", name: "Umami", desc: "Tiefe / Herzhaftigkeit / 'runder Körper'.", tags: ["taste"] },
+      ],
+      edges: [
+        // People -> Products (created)
+        { source: "person:lea", target: "product:cup-ember", type: "CREATED" },
+        { source: "person:lea", target: "product:bowl-zen", type: "CREATED" },
+        { source: "person:amin", target: "product:koji-salt", type: "CREATED" },
+        { source: "person:amin", target: "product:honey-oxymel", type: "CREATED" },
+
+        // Products -> Media
+        { source: "product:cup-ember", target: "media:cup1", type: "HAS_MEDIA" },
+        { source: "product:cup-ember", target: "media:cup2", type: "HAS_MEDIA" },
+        { source: "product:koji-salt", target: "media:koji1", type: "HAS_MEDIA" },
+        { source: "product:honey-oxymel", target: "media:oxymel1", type: "HAS_MEDIA" },
+
+        // Reviews
+        { source: "review:r1", target: "product:koji-salt", type: "REVIEWS" },
+        { source: "review:r2", target: "product:cup-ember", type: "REVIEWS" },
+
+        // Collections
+        { source: "collection:winter-drop", target: "product:cup-ember", type: "INCLUDES" },
+        { source: "collection:winter-drop", target: "product:bowl-zen", type: "INCLUDES" },
+
+        // Concepts
+        { source: "concept:umami", target: "product:koji-salt", type: "RELATED_TO" },
+        { source: "concept:umami", target: "product:honey-oxymel", type: "RELATED_TO" },
+
+        // Media by photographer
+        { source: "person:mara", target: "media:cup1", type: "SHOT" },
+        { source: "person:mara", target: "media:koji1", type: "SHOT" },
+      ]
+    };
+
+    // =========================================================
+    // 2) Graph engine (Force + Filter + Local)
+    // =========================================================
+    const svgEl = document.getElementById("svg");
+    const svg = d3.select(svgEl);
+    const g = svg.append("g");
+
+    const tooltip = document.getElementById("tooltip");
+    const statusEl = document.getElementById("status");
+    const statsEl = document.getElementById("stats");
+    const detailEl = document.getElementById("detail");
+
+    const searchEl = document.getElementById("search");
+    const depthEl  = document.getElementById("depth");
+    const modeEl   = document.getElementById("mode");
+    const resetBtn = document.getElementById("reset");
+    const clearFocusBtn = document.getElementById("clearFocus");
+    const typeChipsEl = document.getElementById("typeChips");
+
+    const width = () => svgEl.clientWidth;
+    const height = () => svgEl.clientHeight;
+
+    const zoom = d3.zoom()
+      .scaleExtent([0.1, 6])
+      .on("zoom", (event) => g.attr("transform", event.transform));
+    svg.call(zoom);
+
+    let linkSel = g.append("g").attr("class", "links").selectAll("line");
+    let nodeSel = g.append("g").attr("class", "nodes").selectAll("g");
+
+    const nodeById = new Map();
+    const outgoing = new Map();
+    const incoming = new Map();
+
+    // active state
+    let fullGraph = { nodes: [], edges: [] };
+    let displayedGraph = { nodes: [], edges: [] };
+    let focusNodeId = null;
+    let activeTypes = new Set(); // empty => all
+
+    function clampInt(v, min, max) {
+      const n = Number.parseInt(v, 10);
+      if (Number.isNaN(n)) return min;
+      return Math.max(min, Math.min(max, n));
+    }
+
+    function nodeRadius(d) {
+      const deg = d.degree || 0;
+      const base = 5;
+      const bump = Math.min(12, Math.sqrt(deg) * 2);
+      return base + bump;
+    }
+
+    function colorByType(t) {
+      // No explicit colors requested; keep simple grayscale with slight variation via type
+      // We'll encode type in brightness only
+      const map = {
+        "Person": "#111",
+        "Product": "#222",
+        "Review": "#444",
+        "Media": "#666",
+        "Collection": "#333",
+        "Concept": "#555"
+      };
+      return map[t] || "#222";
+    }
+
+    function escapeHtml(s) {
+      return (s || "").replace(/[&<>"']/g, c => ({
+        "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"
+      }[c]));
+    }
+
+    function buildIndexes(graph) {
+      nodeById.clear();
+      outgoing.clear();
+      incoming.clear();
+
+      for (const n of graph.nodes) {
+        nodeById.set(n.id, n);
+        outgoing.set(n.id, []);
+        incoming.set(n.id, []);
+      }
+      for (const e of graph.edges) {
+        if (!outgoing.has(e.source)) outgoing.set(e.source, []);
+        if (!incoming.has(e.target)) incoming.set(e.target, []);
+        outgoing.get(e.source).push(e);
+        incoming.get(e.target).push(e);
+      }
+
+      // degree
+      for (const n of graph.nodes) n.degree = 0;
+      for (const e of graph.edges) {
+        const a = nodeById.get(e.source);
+        const b = nodeById.get(e.target);
+        if (a) a.degree++;
+        if (b) b.degree++;
+      }
+    }
+
+    function filterByTypes(graph) {
+      if (activeTypes.size === 0) return graph;
+      const nodes = graph.nodes.filter(n => activeTypes.has(n.type));
+      const set = new Set(nodes.map(n => n.id));
+      const edges = graph.edges.filter(e => set.has(e.source) && set.has(e.target));
+      return { nodes, edges };
+    }
+
+    function filterBySearch(graph) {
+      const q = (searchEl.value || "").trim().toLowerCase();
+      if (!q) return graph;
+      const nodes = graph.nodes.filter(n => (n.name || "").toLowerCase().includes(q));
+      const set = new Set(nodes.map(n => n.id));
+      const edges = graph.edges.filter(e => set.has(e.source) && set.has(e.target));
+      return { nodes, edges };
+    }
+
+    function localSubgraph(graph, startId, depth) {
+      const adj = new Map();
+      for (const n of graph.nodes) adj.set(n.id, new Set());
+      for (const e of graph.edges) {
+        if (adj.has(e.source)) adj.get(e.source).add(e.target);
+        if (adj.has(e.target)) adj.get(e.target).add(e.source);
+      }
+
+      const visited = new Set([startId]);
+      let frontier = [startId];
+
+      for (let d = 0; d < depth; d++) {
+        const next = [];
+        for (const v of frontier) {
+          for (const nb of (adj.get(v) || [])) {
+            if (!visited.has(nb)) {
+              visited.add(nb);
+              next.push(nb);
+            }
+          }
+        }
+        frontier = next;
+        if (!frontier.length) break;
+      }
+
+      const nodes = graph.nodes.filter(n => visited.has(n.id));
+      const set = new Set(nodes.map(n => n.id));
+      const edges = graph.edges.filter(e => set.has(e.source) && set.has(e.target));
+      return { nodes, edges };
+    }
+
+    function computeDisplayedGraph() {
+      let g1 = filterByTypes(fullGraph);
+      let g2 = filterBySearch(g1);
+
+      if (modeEl.value === "local" && focusNodeId) {
+        const depth = clampInt(depthEl.value, 1, 6);
+        return localSubgraph(g2, focusNodeId, depth);
+      }
+      return g2;
+    }
+
+    // Simulation
+    let simulation = d3.forceSimulation()
+      .force("link", d3.forceLink().id(d => d.id).distance(70).strength(0.25))
+      .force("charge", d3.forceManyBody().strength(-220))
+      .force("center", d3.forceCenter(0, 0))
+      .force("collision", d3.forceCollide().radius(d => nodeRadius(d) + 2));
+
+    function render() {
+      displayedGraph = computeDisplayedGraph();
+      buildIndexes(displayedGraph);
+
+      // Join links
+      linkSel = linkSel.data(displayedGraph.edges, d => `${d.source}->${d.target}:${d.type}`);
+      linkSel.exit().remove();
+      linkSel = linkSel.enter().append("line").attr("class", "link").merge(linkSel);
+
+      // Join nodes
+      nodeSel = nodeSel.data(displayedGraph.nodes, d => d.id);
+      nodeSel.exit().remove();
+
+      const nodeEnter = nodeSel.enter()
+        .append("g")
+        .attr("class", "node")
+        .call(
+          d3.drag()
+            .on("start", (event, d) => { if (!event.active) simulation.alphaTarget(0.25).restart(); d.fx = d.x; d.fy = d.y; })
+            .on("drag", (event, d) => { d.fx = event.x; d.fy = event.y; })
+            .on("end",  (event, d) => { if (!event.active) simulation.alphaTarget(0); })
+        );
+
+      nodeEnter.append("circle")
+        .attr("r", d => nodeRadius(d))
+        .attr("fill", d => colorByType(d.type));
+
+      nodeEnter.append("text")
+        .attr("x", d => nodeRadius(d) + 5)
+        .attr("y", 4)
+        .text(d => d.name);
+
+      nodeEnter
+        .on("mousemove", (event, d) => {
+          tooltip.style.display = "block";
+          tooltip.style.left = event.clientX + "px";
+          tooltip.style.top  = event.clientY + "px";
+          tooltip.innerHTML = `
+            <div style="font-weight:700">${escapeHtml(d.name)}</div>
+            <div style="opacity:.85">${escapeHtml(d.type)} • degree ${d.degree || 0}</div>
+            ${d.priceEUR ? `<div style="opacity:.85">€ ${d.priceEUR}</div>` : ""}
+          `;
+        })
+        .on("mouseleave", () => tooltip.style.display = "none")
+        .on("click", (event, d) => { event.stopPropagation(); setFocus(d.id); });
+
+      nodeSel = nodeEnter.merge(nodeSel);
+
+      // Update simulation
+      simulation.nodes(displayedGraph.nodes).on("tick", ticked);
+      simulation.force("link").links(displayedGraph.edges);
+      simulation.force("center", d3.forceCenter(width()/2, height()/2));
+      simulation.alpha(0.9).restart();
+
+      updateStats();
+      applyFocusHighlight();
+      updateDetail();
+    }
+
+    function ticked() {
+      linkSel
+        .attr("x1", d => (d.source.x))
+        .attr("y1", d => (d.source.y))
+        .attr("x2", d => (d.target.x))
+        .attr("y2", d => (d.target.y));
+
+      nodeSel.attr("transform", d => `translate(${d.x},${d.y})`);
+    }
+
+    function updateStats() {
+      const types = {};
+      for (const n of displayedGraph.nodes) types[n.type] = (types[n.type] || 0) + 1;
+
+      statsEl.innerHTML = `
+        <div style="margin-bottom:6px">
+          <span class="pill">Nodes: ${displayedGraph.nodes.length}</span>
+          <span class="pill">Edges: ${displayedGraph.edges.length}</span>
+        </div>
+        <div class="small muted">${Object.entries(types).map(([k,v]) => `${k}: ${v}`).join(" • ")}</div>
+      `;
+    }
+
+    function setFocus(id) {
+      focusNodeId = id;
+
+      // If local mode, re-render to show neighborhood
+      if (modeEl.value === "local") render();
+      else {
+        applyFocusHighlight();
+        updateDetail();
+      }
+
+      // center on node (if present)
+      const n = displayedGraph.nodes.find(x => x.id === id);
+      if (n) {
+        const t = d3.zoomTransform(svgEl);
+        const k = t.k;
+        const x = width()/2 - n.x * k;
+        const y = height()/2 - n.y * k;
+        svg.transition().duration(420).call(zoom.transform, d3.zoomIdentity.translate(x, y).scale(k));
+      }
+    }
+
+    function clearFocus() {
+      focusNodeId = null;
+      applyFocusHighlight();
+      updateDetail();
+      if (modeEl.value === "local") render();
+    }
+
+    function applyFocusHighlight() {
+      nodeSel.classed("dim", false);
+      linkSel.classed("dim", false).classed("highlight", false);
+
+      if (!focusNodeId) return;
+
+      const neigh = new Set([focusNodeId]);
+      for (const e of displayedGraph.edges) {
+        const a = e.source.id || e.source;
+        const b = e.target.id || e.target;
+        if (a === focusNodeId) neigh.add(b);
+        if (b === focusNodeId) neigh.add(a);
+      }
+
+      nodeSel.classed("dim", d => !neigh.has(d.id));
+      linkSel
+        .classed("highlight", e => {
+          const a = e.source.id || e.source;
+          const b = e.target.id || e.target;
+          return a === focusNodeId || b === focusNodeId;
+        })
+        .classed("dim", e => {
+          const a = e.source.id || e.source;
+          const b = e.target.id || e.target;
+          return !(neigh.has(a) && neigh.has(b));
+        });
+    }
+
+    function neighborsOf(id) {
+      const out = [];
+      for (const e of (DATA.edges || [])) {
+        if (e.source === id) out.push({ dir: "out", e });
+        if (e.target === id) out.push({ dir: "in",  e });
+      }
+      return out;
+    }
+
+    function updateDetail() {
+      if (!focusNodeId) {
+        detailEl.innerHTML = `<div class="small muted">Kein Fokus. Klick ein Atom.</div>`;
+        return;
+      }
+
+      const n = (DATA.nodes || []).find(x => x.id === focusNodeId);
+      if (!n) {
+        detailEl.innerHTML = `<div class="small muted">Fokus-Atom nicht gefunden.</div>`;
+        return;
+      }
+
+      const rel = neighborsOf(focusNodeId);
+      const cards = [];
+
+      // Basic card
+      let kvs = [];
+      kvs.push(kv("Typ", n.type));
+      if (n.role) kvs.push(kv("Rolle", n.role));
+      if (n.category) kvs.push(kv("Kategorie", n.category));
+      if (typeof n.priceEUR === "number") kvs.push(kv("Preis", `€ ${n.priceEUR}`));
+      if (n.date) kvs.push(kv("Datum", n.date));
+      if (typeof n.rating === "number") kvs.push(kv("Rating", `${n.rating} / 5`));
+
+      const tags = (n.tags || []).map(t => `<span class="pill">${escapeHtml(t)}</span>`).join(" ");
+
+      // gather media thumbnails if Product or Person etc.
+      const mediaIds = [];
+      for (const e of DATA.edges) {
+        if (e.source === n.id && e.type === "HAS_MEDIA") mediaIds.push(e.target);
+        if (e.target === n.id && e.type === "HAS_MEDIA") mediaIds.push(e.source);
+      }
+      const medias = mediaIds
+        .map(mid => DATA.nodes.find(x => x.id === mid && x.type === "Media"))
+        .filter(Boolean);
+
+      const thumbs = medias.length
+        ? `<div class="thumbs">${medias.slice(0, 8).map(m => `<img src="${escapeHtml(m.url)}" alt="${escapeHtml(m.name)}" />`).join("")}</div>`
+        : "";
+
+      cards.push(`
+        <div class="card">
+          <div class="title">${escapeHtml(n.name)}</div>
+          <div class="small muted" style="margin-top:4px">${escapeHtml(n.desc || n.bio || n.text || "")}</div>
+          <div class="kvs">${kvs.join("")}</div>
+          ${tags ? `<div style="margin-top:8px">${tags}</div>` : ""}
+          ${thumbs}
+        </div>
+      `);
+
+      // Relationship list (compact)
+      const relLines = rel.slice(0, 18).map(({dir, e}) => {
+        const otherId = (dir === "out") ? e.target : e.source;
+        const other = DATA.nodes.find(x => x.id === otherId);
+        const otherName = other ? other.name : otherId;
+        return `<div class="kv">
+          <div class="k">${escapeHtml(dir === "out" ? e.type : (e.type + " (in)"))}</div>
+          <div class="v"><a href="#" data-focus="${escapeHtml(otherId)}">${escapeHtml(otherName)}</a></div>
+        </div>`;
+      }).join("");
+
+      cards.push(`
+        <div class="card" style="margin-top:10px">
+          <div class="title">Verbindungen</div>
+          <div class="kvs" style="margin-top:8px">
+            ${relLines || `<div class="small muted">Keine Verbindungen</div>`}
+          </div>
+        </div>
+      `);
+
+      detailEl.innerHTML = cards.join("");
+
+      // wire focus links
+      detailEl.querySelectorAll("a[data-focus]").forEach(a => {
+        a.addEventListener("click", (ev) => {
+          ev.preventDefault();
+          setFocus(a.getAttribute("data-focus"));
+        });
+      });
+    }
+
+    function kv(k, v) {
+      return `<div class="kv"><div class="k">${escapeHtml(k)}</div><div class="v">${escapeHtml(String(v))}</div></div>`;
+    }
+
+    // ---------------------------------------------------------
+    // Type chips UI
+    // ---------------------------------------------------------
+    function initTypeChips() {
+      const types = Array.from(new Set(DATA.nodes.map(n => n.type))).sort();
+      typeChipsEl.innerHTML = "";
+
+      // "All" chip
+      const allChip = document.createElement("div");
+      allChip.className = "chip active";
+      allChip.textContent = "Alle";
+      allChip.addEventListener("click", () => {
+        activeTypes = new Set();
+        // set UI
+        typeChipsEl.querySelectorAll(".chip").forEach(c => c.classList.remove("active"));
+        allChip.classList.add("active");
+        render();
+      });
+      typeChipsEl.appendChild(allChip);
+
+      for (const t of types) {
+        const chip = document.createElement("div");
+        chip.className = "chip";
+        chip.textContent = t;
+        chip.addEventListener("click", () => {
+          // toggle chip
+          const on = chip.classList.toggle("active");
+
+          // if any specific chip active, "All" turns off
+          allChip.classList.remove("active");
+
+          // build set from active chips (excluding "Alle")
+          const set = new Set();
+          typeChipsEl.querySelectorAll(".chip.active").forEach(c => {
+            if (c.textContent !== "Alle") set.add(c.textContent);
+          });
+
+          activeTypes = set;
+
+          // if none selected, go back to all
+          if (activeTypes.size === 0) {
+            allChip.classList.add("active");
+          }
+
+          render();
+        });
+        typeChipsEl.appendChild(chip);
+      }
+    }
+
+    // ---------------------------------------------------------
+    // Events
+    // ---------------------------------------------------------
+    svg.on("click", () => clearFocus());
+    window.addEventListener("keydown", (e) => { if (e.key === "Escape") clearFocus(); });
+
+    searchEl.addEventListener("input", () => render());
+    depthEl.addEventListener("change", () => render());
+    modeEl.addEventListener("change", () => render());
+
+    resetBtn.addEventListener("click", () => {
+      nodeSel.each(d => { d.fx = null; d.fy = null; });
+      svg.transition().duration(350).call(zoom.transform, d3.zoomIdentity);
+      simulation.alpha(0.8).restart();
+    });
+
+    clearFocusBtn.addEventListener("click", () => clearFocus());
+
+    // Handle resize
+    const ro = new ResizeObserver(() => {
+      simulation.force("center", d3.forceCenter(width()/2, height()/2));
+      simulation.alpha(0.2).restart();
+    });
+    ro.observe(document.getElementById("main"));
+
+    // ---------------------------------------------------------
+    // Boot
+    // ---------------------------------------------------------
+    fullGraph = { nodes: DATA.nodes.map(n => ({...n})), edges: DATA.edges.map(e => ({...e})) };
+    initTypeChips();
+    render();
+  </script>
+</body>
+</html>
 
